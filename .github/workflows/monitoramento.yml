@@ -1,0 +1,91 @@
+name: CI - Coletar Métricas
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+# Permissão necessária para o pipeline conseguir commitar o histórico de volta no repositório
+permissions:
+  contents: write
+
+jobs:
+  collect-metrics:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Registrar início
+        id: start
+        run: echo "start=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Utiliza o token automático com permissão de escrita configurada acima
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Simular Build
+        run: sleep 2
+
+      - name: Registrar fim e calcular tempo
+        id: finish
+        run: |
+          END=$(date +%s)
+          START=${{ steps.start.outputs.start }}
+          DURATION=$((END - START))
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+
+      # 1. Atualizar ou Criar o CSV histórico localmente na máquina do Runner
+      - name: Atualizar histórico de métricas (CSV)
+        run: |
+          mkdir -p dados
+          arquivo_csv="dados/historico_metricas.csv"
+          timestamp="$(date +"%Y-%m-%d %H:%M:%S")"
+          duration=${{ steps.finish.outputs.duration }}
+          
+          # Se o arquivo não existir, cria com o cabeçalho correto
+          if [ ! -f "$arquivo_csv" ]; then
+            echo "timestamp,duration" > "$arquivo_csv"
+          fi
+          
+          # Adiciona a nova linha de métrica aferida pelo pipeline
+          echo "$timestamp,$duration" >> "$arquivo_csv"
+
+      # 2. Gerar arquivo JSON de métricas
+      - name: Gerar arquivo JSON de métricas
+        run: |
+          mkdir -p metrics
+          echo "{\"timestamp\": \"$(date -Iseconds)\", \"duration\": ${{ steps.finish.outputs.duration }} }" > metrics/metrics.json
+
+      # Só adiciona ao Git os arquivos que realmente existem para evitar o erro
+      - name: Commitar e persistir histórico de monitoramento
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          if [ -f "dados/historico_metricas.csv" ]; then
+            git add dados/historico_metricas.csv
+          fi
+          
+          if [ -f "metrics/metrics.json" ]; then
+            git add metrics/metrics.json
+          fi
+          
+          git commit -m "chore: atualiza métricas de monitoramento do build [skip ci]" || true
+          
+          # PASSO CHAVE: Sincroniza com o que o outro pipeline enviou antes de empurrar
+          git pull --rebase origin main
+          git push
+
+      # Mantém a publicação dos artefatos caso precise baixá-los manualmente pela interface do GitHub
+      - name: Upload de métricas (JSON)
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics-${{ github.run_number }}
+          path: metrics/metrics.json
+
+      - name: Upload do histórico atualizado (CSV)
+        uses: actions/upload-artifact@v4
+        with:
+          name: historico-metricas-atualizado
+          path: dados/historico_metricas.csv

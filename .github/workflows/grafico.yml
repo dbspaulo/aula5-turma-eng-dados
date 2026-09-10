@@ -1,0 +1,125 @@
+name: Gerar Gráfico de Métricas
+
+on:
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Instalar Python
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip
+
+      - name: Instalar matplotlib
+        run: pip3 install matplotlib
+
+      - name: Verificar CSV
+        run: |
+          echo "Conteúdo do CSV:"
+          cat dados/historico_metricas.csv || echo "Arquivo não encontrado"
+
+      - name: Gerar gráfico
+        run: |
+          python3 << 'EOF'
+
+          import csv
+          import matplotlib.pyplot as plt
+          import sys
+          import os
+
+          caminho_csv = "dados/historico_metricas.csv"
+
+          # Verifica existência
+          if not os.path.exists(caminho_csv):
+              print(f"Erro: arquivo '{caminho_csv}' não encontrado.")
+              sys.exit(1)
+
+          timestamps = []
+          durations = []
+
+          # Leitura do CSV
+          with open(caminho_csv, mode='r', encoding='utf-8') as fp:
+
+              reader = csv.DictReader(fp)
+
+              print("Colunas encontradas:")
+              print(reader.fieldnames)
+
+              for row in reader:
+
+                  print(f"Linha lida: {row}")
+
+                  try:
+
+                      timestamp = row.get("timestamp", "").strip()
+                      duration = row.get("duration", "").strip()
+
+                      # Ignora linhas vazias
+                      if not timestamp or not duration:
+                          print("Linha ignorada.")
+                          continue
+
+                      # Corrige vírgula decimal
+                      duration = duration.replace(",", ".")
+
+                      timestamps.append(timestamp)
+                      durations.append(float(duration))
+
+                  except Exception as e:
+                      print(f"Erro ao processar linha: {e}")
+
+          # Caso não existam dados válidos
+          if not timestamps:
+              print("Nenhum dado válido encontrado.")
+              timestamps = ["sem dados"]
+              durations = [0]
+
+          print(f"Plotando {len(timestamps)} pontos.")
+
+          # Índices para eixo X
+          x = range(len(durations))
+
+          # Construção do gráfico
+          plt.figure(figsize=(12, 5))
+
+          plt.plot(
+              x,
+              durations,
+              marker='o',
+              linestyle='-'
+          )
+
+          plt.xticks(
+              x,
+              timestamps,
+              rotation=45,
+              ha="right"
+          )
+
+          plt.title("Evolução do Tempo de Execução do Pipeline")
+
+          plt.xlabel("Execução")
+
+          plt.ylabel("Duração (s)")
+
+          plt.grid(True)
+
+          plt.tight_layout()
+
+          plt.savefig("pipeline_evolution.png")
+
+          print("Gráfico gerado com sucesso!")
+
+          EOF
+
+      - name: Upload do gráfico
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-graph
+          path: pipeline_evolution.png
